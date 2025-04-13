@@ -1,1 +1,15 @@
 @import "tailwindcss";
+
+button {
+    @apply rounded-md py-1 px-4 bg-neutral-800 border border-neutral-700 transition-all duration-700 hover:bg-neutral-900 hover:border-green-400;
+}
+
+input[type="text"] {
+    @apply rounded-md py-1 px-4 bg-neutral-800 border border-neutral-700 transition-all duration-700 focus:border-green-400 focus:outline-0;
+}
+
+select {
+    @apply py-1 px-4 bg-neutral-800 border border-neutral-700 transition-all rounded-md;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+}
