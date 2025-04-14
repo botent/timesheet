@@ -4,6 +4,7 @@ pub mod database;
 pub mod tasks;
 pub mod ui;
 
+use crate::helpers::database::create_task_sessions_table;
 use crate::models::DbState;
 use r2d2_sqlite::SqliteConnectionManager;
 
@@ -32,6 +33,7 @@ pub fn setup_app<R: Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<dyn std:
             )",
             [],
         )?;
+        create_task_sessions_table(&conn)?;
     }
 
     app_handle.manage(DbState { pool });

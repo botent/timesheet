@@ -1,4 +1,5 @@
 export interface Task {
+  id: String;
   title: String;
   status: TaskStatus;
   created: Date;

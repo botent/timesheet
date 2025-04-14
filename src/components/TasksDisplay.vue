@@ -2,6 +2,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { ref } from "vue";
 import { CheckIcon, Delete } from "lucide-vue-next";
+import type Task from "../types";
 
 const allTasks = ref({});
 async function fetchAndDisplayTasks() {
@@ -31,16 +32,17 @@ fetchAndDisplayTasks();
                 {{ key }}
             </p>
             <div
-                v-for="(valChild, keyChild) in val"
-                :key="keyChild"
+                v-for="([task, duration], index) in val"
+                :key="index"
                 class="w-full flex flex-row items-center justify-between space-x-4 mb-2"
             >
-                <p class="font-semibold w-1/2">{{ valChild["title"] }}</p>
+                <p class="font-semibold w-1/2">{{ task.title }}</p>
                 <p
                     class="text-xs rounded-md p-1 bg-teal-500/10 border border-teal-600/10"
                 >
-                    {{ valChild["status"] }}
+                    {{ task.status }}
                 </p>
+                <p class="text-xs">Duration: {{ duration }} seconds</p>
                 <div
                     class="place-self-end flex flex-row items-center justify-end space-x-2"
                 >

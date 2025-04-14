@@ -1,10 +1,11 @@
-use chrono::NaiveDateTime;
+use chrono::{DateTime, NaiveDateTime, Utc};
 use rusqlite::{params, Error};
 use std::collections::HashMap;
 use tauri::State;
 use uuid::Uuid;
 
-use crate::models::{DbState, UserTask};
+use crate::helpers::database::{create_task_session, get_task_sessions, sum_task_session_duration};
+use crate::models::{DbState, TaskSession, UserTask};
 
 #[tauri::command]
 pub fn create_task(task_data: UserTask, state: State<'_, DbState>) -> Result<(), String> {
@@ -18,15 +19,26 @@ pub fn create_task(task_data: UserTask, state: State<'_, DbState>) -> Result<(),
     match conn.execute(
         "INSERT INTO tasks (id, title, status, created) VALUES (?1, ?2, ?3, ?4)",
         params![
-            task_id,
+            task_id.clone(), // Clone task_id for session creation
             task_data.title,
-            task_data.status,
+            task_data.status.clone(), // Clone status for session creation
             task_data.created
         ],
     ) {
         Ok(rows_affected) => {
             if rows_affected > 0 {
                 println!("Task inserted successfully.");
+
+                // Create initial TaskSession when a task is created
+                let new_session = TaskSession {
+                    id: None,
+                    duration: 0,
+                    task_id: task_id.clone(),
+                    started: Utc::now().to_rfc3339(),
+                    ended: None,
+                };
+                create_task_session(&conn, new_session).map_err(|e| e.to_string())?;
+
                 Ok(())
             } else {
                 eprintln!("Task insert affected 0 rows.");
@@ -37,8 +49,62 @@ pub fn create_task(task_data: UserTask, state: State<'_, DbState>) -> Result<(),
     }
 }
 
+#[tauri::command]
+pub fn update_task_status(
+    task_id: String,
+    status: String,
+    state: State<'_, DbState>,
+) -> Result<(), String> {
+    let conn = state
+        .pool
+        .get()
+        .map_err(|e| format!("Failed to get connection from pool: {}", e))?;
+
+    conn.execute(
+        "UPDATE tasks SET status = ?1 WHERE id = ?2",
+        params![status.clone(), task_id.clone()],
+    )
+    .map_err(|e| format!("Failed to update task status: {}", e))?;
+
+    match status.as_str() {
+        "Running" => {
+            // Create a new TaskSession
+            let new_session = TaskSession {
+                id: None,
+                duration: 0,
+                task_id: task_id.clone(),
+                started: Utc::now().to_rfc3339(),
+                ended: None,
+            };
+            create_task_session(&conn, new_session).map_err(|e| e.to_string())?;
+        }
+        "Paused" | "Completed" => {
+            // End the current TaskSession and update duration
+            let sessions = get_task_sessions(&conn, &task_id).map_err(|e| e.to_string())?;
+            if let Some(mut current_session) =
+                sessions.into_iter().filter(|s| s.ended.is_none()).next()
+            {
+                let started: DateTime<Utc> = DateTime::parse_from_rfc3339(&current_session.started)
+                    .map_err(|e| e.to_string())?
+                    .with_timezone(&Utc);
+                let ended: DateTime<Utc> = Utc::now();
+                let duration = ended.signed_duration_since(started).num_seconds();
+
+                conn.execute(
+                    "UPDATE task_sessions SET ended = ?1, duration = ?2 WHERE id = ?3",
+                    params![ended.to_rfc3339(), duration, current_session.id.unwrap()],
+                )
+                .map_err(|e| format!("Failed to update session: {}", e))?;
+            }
+        }
+        _ => {} // Handle "Not yet started" or any other status (do nothing)
+    }
+
+    Ok(())
+}
+
 // #[tauri::command]
-// pub fn display_tasks(state: State<'_, DbState>) -> Result<Vec<UserTask>, String> {
+// pub fn display_tasks(state: State<'_, DbState>) -> Result<HashMap<String, Vec<UserTask>>, String> {
 //     let conn = state
 //         .pool
 //         .get()
@@ -59,13 +125,42 @@ pub fn create_task(task_data: UserTask, state: State<'_, DbState>) -> Result<(),
 //         })
 //         .map_err(|e| format!("Failed to execute query: {}", e))?;
 
-//     task_iter
-//         .collect::<Result<Vec<UserTask>, rusqlite::Error>>()
-//         .map_err(|e| format!("Failed to collect tasks: {}", e))
+//     let tasks: Result<Vec<UserTask>, Error> = task_iter.collect();
+//     let tasks = tasks.map_err(|e| format!("Failed to collect tasks: {}", e))?;
+
+//     // Group tasks by date
+//     let mut grouped_tasks: HashMap<String, Vec<UserTask>> = HashMap::new();
+//     for task in tasks {
+//         let date = match NaiveDateTime::parse_from_str(&task.created, "%Y-%m-%dT%H:%M:%S%.fZ") {
+//             Ok(datetime) => datetime.format("%Y-%m-%d").to_string(), // Extract date
+//             Err(_) => {
+//                 eprintln!("Failed to parse date: {}", task.created);
+//                 continue; // Skip tasks with invalid dates
+//             }
+//         };
+
+//         grouped_tasks.entry(date).or_default().push(task);
+//     }
+
+//     // Sort dates in descending order
+//     let mut sorted_dates: Vec<String> = grouped_tasks.keys().cloned().collect();
+//     sorted_dates.sort_by(|a, b| b.cmp(a)); // Descending order
+
+//     // Create a new HashMap with sorted dates
+//     let mut sorted_grouped_tasks: HashMap<String, Vec<UserTask>> = HashMap::new();
+//     for date in sorted_dates {
+//         if let Some(tasks) = grouped_tasks.get(&date) {
+//             sorted_grouped_tasks.insert(date.clone(), tasks.clone());
+//         }
+//     }
+
+//     Ok(sorted_grouped_tasks)
 // }
 
 #[tauri::command]
-pub fn display_tasks(state: State<'_, DbState>) -> Result<HashMap<String, Vec<UserTask>>, String> {
+pub fn display_tasks(
+    state: State<'_, DbState>,
+) -> Result<HashMap<String, Vec<(UserTask, i64)>>, String> {
     let conn = state
         .pool
         .get()
@@ -89,26 +184,33 @@ pub fn display_tasks(state: State<'_, DbState>) -> Result<HashMap<String, Vec<Us
     let tasks: Result<Vec<UserTask>, Error> = task_iter.collect();
     let tasks = tasks.map_err(|e| format!("Failed to collect tasks: {}", e))?;
 
-    // Group tasks by date
-    let mut grouped_tasks: HashMap<String, Vec<UserTask>> = HashMap::new();
+    // Group tasks by date and calculate total duration
+    let mut grouped_tasks: HashMap<String, Vec<(UserTask, i64)>> = HashMap::new();
     for task in tasks {
         let date = match NaiveDateTime::parse_from_str(&task.created, "%Y-%m-%dT%H:%M:%S%.fZ") {
-            Ok(datetime) => datetime.format("%Y-%m-%d").to_string(), // Extract date
+            Ok(datetime) => datetime.format("%Y-%m-%d").to_string(),
             Err(_) => {
                 eprintln!("Failed to parse date: {}", task.created);
-                continue; // Skip tasks with invalid dates
+                continue;
             }
         };
 
-        grouped_tasks.entry(date).or_default().push(task);
+        // Calculate total duration for the task
+        let task_id_str = task.id.as_deref().unwrap_or("");
+        let total_duration = sum_task_session_duration(&conn, task_id_str).unwrap_or(0);
+
+        grouped_tasks
+            .entry(date)
+            .or_default()
+            .push((task, total_duration));
     }
 
     // Sort dates in descending order
     let mut sorted_dates: Vec<String> = grouped_tasks.keys().cloned().collect();
-    sorted_dates.sort_by(|a, b| b.cmp(a)); // Descending order
+    sorted_dates.sort_by(|a, b| b.cmp(a));
 
     // Create a new HashMap with sorted dates
-    let mut sorted_grouped_tasks: HashMap<String, Vec<UserTask>> = HashMap::new();
+    let mut sorted_grouped_tasks: HashMap<String, Vec<(UserTask, i64)>> = HashMap::new();
     for date in sorted_dates {
         if let Some(tasks) = grouped_tasks.get(&date) {
             sorted_grouped_tasks.insert(date.clone(), tasks.clone());
