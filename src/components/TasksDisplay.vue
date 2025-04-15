@@ -1,18 +1,26 @@
 <script setup lang="ts">
 import { invoke } from "@tauri-apps/api/core";
 import { ref } from "vue";
-import { CheckIcon, Delete } from "lucide-vue-next";
-import type Task from "../types";
+import { CheckIcon, Delete, Play, Pause } from "lucide-vue-next";
+import { Task, TaskStatus } from "../types";
 
-const allTasks = ref({});
+const allTasks = ref<{ [date: string]: [Task, number][] }>({});
 async function fetchAndDisplayTasks() {
     try {
         allTasks.value = await invoke("display_tasks");
         console.log("Tasks:", allTasks.value);
-        // Here, you would update your UI with the 'tasks' data
     } catch (error) {
         console.error("Failed to fetch tasks:", error);
-        // Display an error message to the user
+    }
+}
+
+async function updateTaskStatus(taskId: string, status: TaskStatus) {
+    try {
+        await invoke("update_task_status", { taskId, status });
+        console.log(`Task ${taskId} status updated to ${status}`);
+        fetchAndDisplayTasks(); // Refresh tasks after update
+    } catch (error) {
+        console.error(`Failed to update task status: ${error}`);
     }
 }
 
@@ -46,7 +54,24 @@ fetchAndDisplayTasks();
                 <div
                     class="place-self-end flex flex-row items-center justify-end space-x-2"
                 >
-                    <button class="rounded-sm !p-1 border border-neutral-700">
+                    <button
+                        v-if="task.status !== TaskStatus.RUNNING"
+                        class="rounded-sm !p-1 border border-neutral-700"
+                        @click="updateTaskStatus(task.id, TaskStatus.RUNNING)"
+                    >
+                        <Play class="size-3" />
+                    </button>
+                    <button
+                        v-if="task.status === TaskStatus.RUNNING"
+                        class="rounded-sm !p-1 border border-neutral-700"
+                        @click="updateTaskStatus(task.id, TaskStatus.PAUSED)"
+                    >
+                        <Pause class="size-3" />
+                    </button>
+                    <button
+                        class="rounded-sm !p-1 border border-neutral-700"
+                        @click="updateTaskStatus(task.id, TaskStatus.COMPLETED)"
+                    >
                         <CheckIcon class="size-3" />
                     </button>
                     <button class="rounded-sm !p-1 border border-neutral-700">
@@ -57,3 +82,5 @@ fetchAndDisplayTasks();
         </div>
     </section>
 </template>
+
+<style scoped></style>

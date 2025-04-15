@@ -14,6 +14,7 @@ pub fn run() {
             commands::ui::set_title,
             commands::tasks::create_task,
             commands::tasks::display_tasks,
+            commands::tasks::update_task_status,
             commands::database::reset_database,
         ])
         .run(tauri::generate_context!())

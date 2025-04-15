@@ -81,8 +81,7 @@ pub fn update_task_status(
         "Paused" | "Completed" => {
             // End the current TaskSession and update duration
             let sessions = get_task_sessions(&conn, &task_id).map_err(|e| e.to_string())?;
-            if let Some(mut current_session) =
-                sessions.into_iter().filter(|s| s.ended.is_none()).next()
+            if let Some(current_session) = sessions.into_iter().filter(|s| s.ended.is_none()).next()
             {
                 let started: DateTime<Utc> = DateTime::parse_from_rfc3339(&current_session.started)
                     .map_err(|e| e.to_string())?
@@ -104,7 +103,9 @@ pub fn update_task_status(
 }
 
 // #[tauri::command]
-// pub fn display_tasks(state: State<'_, DbState>) -> Result<HashMap<String, Vec<UserTask>>, String> {
+// pub fn display_tasks(
+//     state: State<'_, DbState>,
+// ) -> Result<HashMap<String, Vec<(UserTask, i64)>>, String> {
 //     let conn = state
 //         .pool
 //         .get()
@@ -128,26 +129,33 @@ pub fn update_task_status(
 //     let tasks: Result<Vec<UserTask>, Error> = task_iter.collect();
 //     let tasks = tasks.map_err(|e| format!("Failed to collect tasks: {}", e))?;
 
-//     // Group tasks by date
-//     let mut grouped_tasks: HashMap<String, Vec<UserTask>> = HashMap::new();
+//     // Group tasks by date and calculate total duration
+//     let mut grouped_tasks: HashMap<String, Vec<(UserTask, i64)>> = HashMap::new();
 //     for task in tasks {
 //         let date = match NaiveDateTime::parse_from_str(&task.created, "%Y-%m-%dT%H:%M:%S%.fZ") {
-//             Ok(datetime) => datetime.format("%Y-%m-%d").to_string(), // Extract date
+//             Ok(datetime) => datetime.format("%Y-%m-%d").to_string(),
 //             Err(_) => {
 //                 eprintln!("Failed to parse date: {}", task.created);
-//                 continue; // Skip tasks with invalid dates
+//                 continue;
 //             }
 //         };
 
-//         grouped_tasks.entry(date).or_default().push(task);
+//         // Calculate total duration for the task
+//         let task_id_str = task.id.as_deref().unwrap_or("");
+//         let total_duration = sum_task_session_duration(&conn, task_id_str).unwrap_or(0);
+
+//         grouped_tasks
+//             .entry(date)
+//             .or_default()
+//             .push((task, total_duration));
 //     }
 
 //     // Sort dates in descending order
 //     let mut sorted_dates: Vec<String> = grouped_tasks.keys().cloned().collect();
-//     sorted_dates.sort_by(|a, b| b.cmp(a)); // Descending order
+//     sorted_dates.sort_by(|a, b| b.cmp(a));
 
 //     // Create a new HashMap with sorted dates
-//     let mut sorted_grouped_tasks: HashMap<String, Vec<UserTask>> = HashMap::new();
+//     let mut sorted_grouped_tasks: HashMap<String, Vec<(UserTask, i64)>> = HashMap::new();
 //     for date in sorted_dates {
 //         if let Some(tasks) = grouped_tasks.get(&date) {
 //             sorted_grouped_tasks.insert(date.clone(), tasks.clone());

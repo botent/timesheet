@@ -11,6 +11,7 @@ pub fn create_task_sessions_table(conn: &Connection) -> Result<(), String> {
             duration INTEGER NOT NULL,
             task_id TEXT NOT NULL,
             started TEXT NOT NULL,
+            ended TEXT NULL,
             FOREIGN KEY (task_id) REFERENCES tasks (id)
         )",
         [],
@@ -25,12 +26,13 @@ pub fn create_task_session(conn: &Connection, session: TaskSession) -> Result<()
     let session_id = Uuid::new_v4().to_string();
 
     conn.execute(
-        "INSERT INTO task_sessions (id, duration, task_id, started) VALUES (?1, ?2, ?3, ?4)",
+        "INSERT INTO task_sessions (id, duration, task_id, started, ended) VALUES (?1, ?2, ?3, ?4, ?5)",
         params![
             session_id,
             session.duration,
             session.task_id,
-            session.started
+            session.started,
+            session.ended,
         ],
     )
     .map_err(|e| format!("Failed to insert task session: {}", e))?;
@@ -38,10 +40,12 @@ pub fn create_task_session(conn: &Connection, session: TaskSession) -> Result<()
     Ok(())
 }
 
-// Function to get TaskSessions by task_id
+// // Function to get TaskSessions by task_id
 pub fn get_task_sessions(conn: &Connection, task_id: &str) -> Result<Vec<TaskSession>, String> {
     let mut stmt = conn
-        .prepare("SELECT id, duration, task_id, started FROM task_sessions WHERE task_id = ?1")
+        .prepare(
+            "SELECT id, duration, task_id, started, ended FROM task_sessions WHERE task_id = ?1",
+        )
         .map_err(|e| format!("Failed to prepare statement: {}", e))?;
 
     let session_iter = stmt

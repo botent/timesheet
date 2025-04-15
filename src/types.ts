@@ -1,6 +1,6 @@
 export interface Task {
-  id: String;
-  title: String;
+  id: string;
+  title: string;
   status: TaskStatus;
   created: Date;
 }
