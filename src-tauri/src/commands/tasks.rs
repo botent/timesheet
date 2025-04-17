@@ -49,8 +49,12 @@ pub fn create_task(task_data: UserTask, state: State<'_, DbState>) -> Result<(),
     }
 }
 
+use tauri::{Manager, Window};
+use crate::commands::tray::{TrayState, update_tray_icon};
+
 #[tauri::command]
 pub fn update_task_status(
+    window: Window,
     task_id: String,
     status: String,
     state: State<'_, DbState>,
@@ -60,14 +64,14 @@ pub fn update_task_status(
         .get()
         .map_err(|e| format!("Failed to get connection from pool: {}", e))?;
 
-    conn.execute(
-        "UPDATE tasks SET status = ?1 WHERE id = ?2",
-        params![status.clone(), task_id.clone()],
-    )
-    .map_err(|e| format!("Failed to update task status: {}", e))?;
-
+    // Get reference to tray state
+    let tray_state = window.state::<TrayState>();
+    
     match status.as_str() {
         "Running" => {
+            // Check if we can add another running task
+            tray_state.add_running_task(task_id.clone())?;
+            
             // Create a new TaskSession
             let new_session = TaskSession {
                 id: None,
@@ -79,6 +83,9 @@ pub fn update_task_status(
             create_task_session(&conn, new_session).map_err(|e| e.to_string())?;
         }
         "Paused" | "Completed" => {
+            // Remove from running tasks
+            tray_state.remove_running_task(&task_id)?;
+            
             // End the current TaskSession and update duration
             let sessions = get_task_sessions(&conn, &task_id).map_err(|e| e.to_string())?;
             if let Some(current_session) = sessions.into_iter().filter(|s| s.ended.is_none()).next()
@@ -98,6 +105,16 @@ pub fn update_task_status(
         }
         _ => {} // Handle "Not yet started" or any other status (do nothing)
     }
+    
+    // Now update the database with the new status
+    conn.execute(
+        "UPDATE tasks SET status = ?1 WHERE id = ?2",
+        params![status.clone(), task_id.clone()],
+    )
+    .map_err(|e| format!("Failed to update task status: {}", e))?;
+    
+    // Update the tray icon to reflect the new state
+    update_tray_icon(&window.app_handle())?;
 
     Ok(())
 }
@@ -164,6 +181,30 @@ pub fn update_task_status(
 
 //     Ok(sorted_grouped_tasks)
 // }
+
+#[tauri::command]
+pub fn delete_task(task_id: String, state: State<'_, DbState>) -> Result<(), String> {
+    let conn = state
+        .pool
+        .get()
+        .map_err(|e| format!("Failed to get connection from pool: {}", e))?;
+
+    // First delete the task sessions associated with this task
+    conn.execute(
+        "DELETE FROM task_sessions WHERE task_id = ?1",
+        params![task_id],
+    )
+    .map_err(|e| format!("Failed to delete task sessions: {}", e))?;
+
+    // Then delete the task itself
+    conn.execute(
+        "DELETE FROM tasks WHERE id = ?1",
+        params![task_id],
+    )
+    .map_err(|e| format!("Failed to delete task: {}", e))?;
+
+    Ok(())
+}
 
 #[tauri::command]
 pub fn display_tasks(

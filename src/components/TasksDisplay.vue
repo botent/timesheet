@@ -24,6 +24,16 @@ async function updateTaskStatus(taskId: string, status: TaskStatus) {
     }
 }
 
+async function deleteTask(taskId: string) {
+    try {
+        await invoke("delete_task", { taskId });
+        console.log(`Task ${taskId} deleted successfully`);
+        fetchAndDisplayTasks(); // Refresh tasks after deletion
+    } catch (error) {
+        console.error(`Failed to delete task: ${error}`);
+    }
+}
+
 fetchAndDisplayTasks();
 </script>
 
@@ -74,7 +84,10 @@ fetchAndDisplayTasks();
                     >
                         <CheckIcon class="size-3" />
                     </button>
-                    <button class="rounded-sm !p-1 border border-neutral-700">
+                    <button 
+                        class="rounded-sm !p-1 border border-neutral-700"
+                        @click="deleteTask(task.id)"
+                    >
                         <Delete class="size-3" />
                     </button>
                 </div>

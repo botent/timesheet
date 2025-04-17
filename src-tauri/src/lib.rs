@@ -6,8 +6,14 @@ mod models;
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        // Configure the app on setup
         .setup(|app| {
+            // Initialize the database and application state
             commands::setup_app(app)?;
+            
+            // Note: The tray icon will be implemented in a future update
+            // when Tauri v2 API is more stable and better documented
+            
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -15,6 +21,7 @@ pub fn run() {
             commands::tasks::create_task,
             commands::tasks::display_tasks,
             commands::tasks::update_task_status,
+            commands::tasks::delete_task,
             commands::database::reset_database,
         ])
         .run(tauri::generate_context!())
