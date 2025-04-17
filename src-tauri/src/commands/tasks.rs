@@ -67,12 +67,19 @@ pub fn update_task_status(
     // Get reference to tray state
     let tray_state = window.state::<TrayState>();
 
+    // Get the current task status before updating
+    let mut stmt = conn.prepare("SELECT status FROM tasks WHERE id = ?1")
+        .map_err(|e| format!("Failed to prepare statement: {}", e))?;
+    let current_status: String = stmt.query_row(params![task_id.clone()], |row| row.get(0))
+        .map_err(|e| format!("Failed to get current task status: {}", e))?;
+    
     match status.as_str() {
         "Running" => {
             // Check if we can add another running task
             tray_state.add_running_task(task_id.clone())?;
 
-            // Create a new TaskSession
+            // Create a new TaskSession - always start with 0 duration
+            // Previous sessions' durations will be preserved and added to the total
             let new_session = TaskSession {
                 id: None,
                 duration: 0,
@@ -87,10 +94,10 @@ pub fn update_task_status(
             tray_state.remove_running_task(&task_id)?;
 
             // End the current TaskSession and update duration
+            // Only close open sessions - there should only be one open session when a task is running
             let sessions = get_task_sessions(&conn, &task_id).map_err(|e| e.to_string())?;
-            if let Some(current_session) = sessions.into_iter().filter(|s| s.ended.is_none()).next()
-            {
-                let started: DateTime<Utc> = DateTime::parse_from_rfc3339(&current_session.started)
+            for session in sessions.into_iter().filter(|s| s.ended.is_none()) {
+                let started: DateTime<Utc> = DateTime::parse_from_rfc3339(&session.started)
                     .map_err(|e| e.to_string())?
                     .with_timezone(&Utc);
                 let ended: DateTime<Utc> = Utc::now();
@@ -98,7 +105,7 @@ pub fn update_task_status(
 
                 conn.execute(
                     "UPDATE task_sessions SET ended = ?1, duration = ?2 WHERE id = ?3",
-                    params![ended.to_rfc3339(), duration, current_session.id.unwrap()],
+                    params![ended.to_rfc3339(), duration, session.id.unwrap()],
                 )
                 .map_err(|e| format!("Failed to update session: {}", e))?;
             }
