@@ -49,8 +49,8 @@ pub fn create_task(task_data: UserTask, state: State<'_, DbState>) -> Result<(),
     }
 }
 
+use crate::commands::tray::{update_tray_icon, TrayState};
 use tauri::{Manager, Window};
-use crate::commands::tray::{TrayState, update_tray_icon};
 
 #[tauri::command]
 pub fn update_task_status(
@@ -66,12 +66,12 @@ pub fn update_task_status(
 
     // Get reference to tray state
     let tray_state = window.state::<TrayState>();
-    
+
     match status.as_str() {
         "Running" => {
             // Check if we can add another running task
             tray_state.add_running_task(task_id.clone())?;
-            
+
             // Create a new TaskSession
             let new_session = TaskSession {
                 id: None,
@@ -85,7 +85,7 @@ pub fn update_task_status(
         "Paused" | "Completed" => {
             // Remove from running tasks
             tray_state.remove_running_task(&task_id)?;
-            
+
             // End the current TaskSession and update duration
             let sessions = get_task_sessions(&conn, &task_id).map_err(|e| e.to_string())?;
             if let Some(current_session) = sessions.into_iter().filter(|s| s.ended.is_none()).next()
@@ -105,82 +105,19 @@ pub fn update_task_status(
         }
         _ => {} // Handle "Not yet started" or any other status (do nothing)
     }
-    
+
     // Now update the database with the new status
     conn.execute(
         "UPDATE tasks SET status = ?1 WHERE id = ?2",
         params![status.clone(), task_id.clone()],
     )
     .map_err(|e| format!("Failed to update task status: {}", e))?;
-    
+
     // Update the tray icon to reflect the new state
     update_tray_icon(&window.app_handle())?;
 
     Ok(())
 }
-
-// #[tauri::command]
-// pub fn display_tasks(
-//     state: State<'_, DbState>,
-// ) -> Result<HashMap<String, Vec<(UserTask, i64)>>, String> {
-//     let conn = state
-//         .pool
-//         .get()
-//         .map_err(|e| format!("Failed to get connection from pool: {}", e))?;
-
-//     let mut stmt = conn
-//         .prepare("SELECT id, title, status, created FROM tasks")
-//         .map_err(|e| format!("Failed to prepare statement: {}", e))?;
-
-//     let task_iter = stmt
-//         .query_map([], |row| {
-//             Ok(UserTask {
-//                 id: row.get(0)?,
-//                 title: row.get(1)?,
-//                 status: row.get(2)?,
-//                 created: row.get(3)?,
-//             })
-//         })
-//         .map_err(|e| format!("Failed to execute query: {}", e))?;
-
-//     let tasks: Result<Vec<UserTask>, Error> = task_iter.collect();
-//     let tasks = tasks.map_err(|e| format!("Failed to collect tasks: {}", e))?;
-
-//     // Group tasks by date and calculate total duration
-//     let mut grouped_tasks: HashMap<String, Vec<(UserTask, i64)>> = HashMap::new();
-//     for task in tasks {
-//         let date = match NaiveDateTime::parse_from_str(&task.created, "%Y-%m-%dT%H:%M:%S%.fZ") {
-//             Ok(datetime) => datetime.format("%Y-%m-%d").to_string(),
-//             Err(_) => {
-//                 eprintln!("Failed to parse date: {}", task.created);
-//                 continue;
-//             }
-//         };
-
-//         // Calculate total duration for the task
-//         let task_id_str = task.id.as_deref().unwrap_or("");
-//         let total_duration = sum_task_session_duration(&conn, task_id_str).unwrap_or(0);
-
-//         grouped_tasks
-//             .entry(date)
-//             .or_default()
-//             .push((task, total_duration));
-//     }
-
-//     // Sort dates in descending order
-//     let mut sorted_dates: Vec<String> = grouped_tasks.keys().cloned().collect();
-//     sorted_dates.sort_by(|a, b| b.cmp(a));
-
-//     // Create a new HashMap with sorted dates
-//     let mut sorted_grouped_tasks: HashMap<String, Vec<(UserTask, i64)>> = HashMap::new();
-//     for date in sorted_dates {
-//         if let Some(tasks) = grouped_tasks.get(&date) {
-//             sorted_grouped_tasks.insert(date.clone(), tasks.clone());
-//         }
-//     }
-
-//     Ok(sorted_grouped_tasks)
-// }
 
 #[tauri::command]
 pub fn delete_task(task_id: String, state: State<'_, DbState>) -> Result<(), String> {
@@ -197,11 +134,8 @@ pub fn delete_task(task_id: String, state: State<'_, DbState>) -> Result<(), Str
     .map_err(|e| format!("Failed to delete task sessions: {}", e))?;
 
     // Then delete the task itself
-    conn.execute(
-        "DELETE FROM tasks WHERE id = ?1",
-        params![task_id],
-    )
-    .map_err(|e| format!("Failed to delete task: {}", e))?;
+    conn.execute("DELETE FROM tasks WHERE id = ?1", params![task_id])
+        .map_err(|e| format!("Failed to delete task: {}", e))?;
 
     Ok(())
 }

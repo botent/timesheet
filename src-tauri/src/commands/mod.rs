@@ -5,10 +5,10 @@ pub mod tasks;
 pub mod tray;
 pub mod ui;
 
+use crate::commands::tray::{set_tray_icon, update_tray_icon, TrayState};
 use crate::helpers::database::create_task_sessions_table;
 use crate::models::DbState;
 use r2d2_sqlite::SqliteConnectionManager;
-use crate::commands::tray::{TrayState, update_tray_icon};
 
 pub fn setup_app<R: Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<dyn std::error::Error>> {
     let app_handle = app.handle();
@@ -39,12 +39,13 @@ pub fn setup_app<R: Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<dyn std:
     }
 
     app_handle.manage(DbState { pool });
-    
+
     // Initialize the tray state
     let tray_state = TrayState::new();
     app_handle.manage(tray_state);
-    
+
     // Initialize the tray icon
+    set_tray_icon(app_handle).map_err(|e| Box::<dyn std::error::Error>::from(e.to_string()))?;
     update_tray_icon(&app_handle).map_err(|e| Box::<dyn std::error::Error>::from(e.to_string()))?;
 
     Ok(())
