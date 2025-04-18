@@ -66,7 +66,7 @@ pub fn set_tray_icon<R: Runtime>(app_handle: &AppHandle<R>) -> Result<(), String
     let icon = Image::from_path("../src-tauri/icons/icon.png")
         .map_err(|e| format!("Failed to load icon from path: {}", e))?;
 
-    let tray = TrayIconBuilder::with_id("main")
+    let _tray = TrayIconBuilder::with_id("main")
         .icon(icon)
         .title("title")
         .menu(&menu)
