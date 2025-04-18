@@ -21,6 +21,12 @@ pub fn run() {
             commands::tasks::delete_task,
             commands::database::reset_database,
         ])
+        .on_window_event(|event_window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                event_window.hide().unwrap();
+                api.prevent_close();
+            }
+        })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

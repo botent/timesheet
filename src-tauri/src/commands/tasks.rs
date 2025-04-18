@@ -1,11 +1,11 @@
+use crate::commands::tray::TrayState;
+use crate::helpers::database::{create_task_session, get_task_sessions, sum_task_session_duration};
+use crate::models::{DbState, TaskSession, UserTask};
 use chrono::{DateTime, NaiveDateTime, Utc};
 use rusqlite::{params, Error};
 use std::collections::HashMap;
-use tauri::State;
+use tauri::{AppHandle, Manager, Runtime, State, Window};
 use uuid::Uuid;
-
-use crate::helpers::database::{create_task_session, get_task_sessions, sum_task_session_duration};
-use crate::models::{DbState, TaskSession, UserTask};
 
 #[tauri::command]
 pub fn create_task(task_data: UserTask, state: State<'_, DbState>) -> Result<(), String> {
@@ -49,15 +49,13 @@ pub fn create_task(task_data: UserTask, state: State<'_, DbState>) -> Result<(),
     }
 }
 
-use crate::commands::tray::{update_tray_icon, TrayState};
-use tauri::{Manager, Window};
-
 #[tauri::command]
-pub fn update_task_status(
+pub fn update_task_status<R: Runtime>(
     window: Window,
     task_id: String,
     status: String,
     state: State<'_, DbState>,
+    app_handle: AppHandle<R>,
 ) -> Result<(), String> {
     let conn = state
         .pool
@@ -72,21 +70,21 @@ pub fn update_task_status(
         .query_row(
             "SELECT status FROM tasks WHERE id = ?1",
             params![task_id.clone()],
-            |row| row.get(0)
+            |row| row.get(0),
         )
         .unwrap_or_else(|_| String::from(""));
-    
+
     // Use more specific pattern matching to handle all cases explicitly based on the current status
     match (status.as_str(), current_status.as_str()) {
         // Running status transitions
         ("Running", "Running") => {
             // Already running - just ensure it's in the running tasks list
             tray_state.add_running_task(task_id.clone())?;
-        },
+        }
         ("Running", _) => {
             // Starting a new session or resuming a paused/completed task
             tray_state.add_running_task(task_id.clone())?;
-            
+
             // Create a new TaskSession
             let new_session = TaskSession {
                 id: None,
@@ -96,8 +94,8 @@ pub fn update_task_status(
                 ended: None,
             };
             create_task_session(&conn, new_session).map_err(|e| e.to_string())?;
-        },
-        
+        }
+
         // Paused or Completed status transitions
         ("Paused" | "Completed", "Running") => {
             // Going from Running to Paused/Completed - need to stop the session and calculate duration
@@ -105,35 +103,54 @@ pub fn update_task_status(
 
             // End the current TaskSession and update duration
             let sessions = get_task_sessions(&conn, &task_id).map_err(|e| e.to_string())?;
-            if let Some(current_session) = sessions.into_iter().filter(|s| s.ended.is_none()).next() {
+            if let Some(current_session) = sessions.into_iter().filter(|s| s.ended.is_none()).next()
+            {
                 let started: DateTime<Utc> = DateTime::parse_from_rfc3339(&current_session.started)
                     .map_err(|e| e.to_string())?
                     .with_timezone(&Utc);
                 let ended: DateTime<Utc> = Utc::now();
-                
+
                 // Calculate precise duration in seconds for this session only
                 let session_duration = ended.signed_duration_since(started).num_seconds();
-                
+
                 // Make sure we're storing accurate duration (avoid negative values)
-                let final_duration = if session_duration > 0 { session_duration } else { 0 };
-                
+                let final_duration = if session_duration > 0 {
+                    session_duration
+                } else {
+                    0
+                };
+
                 conn.execute(
                     "UPDATE task_sessions SET ended = ?1, duration = ?2 WHERE id = ?3",
-                    params![ended.to_rfc3339(), final_duration, current_session.id.unwrap()],
+                    params![
+                        ended.to_rfc3339(),
+                        final_duration,
+                        current_session.id.unwrap()
+                    ],
                 )
                 .map_err(|e| format!("Failed to update session: {}", e))?;
             }
-        },
+        }
         ("Paused" | "Completed", _) => {
             // Already paused/completed or changing between Paused and Completed
             // Just ensure it's not in the running tasks list
             tray_state.remove_running_task(&task_id)?;
-        },
-        
+        }
+
         // Other status transitions (fallback)
         (_, _) => {
             // No action needed for other status combinations
         }
+    }
+
+    let running_count = tray_state.get_running_task_count()?;
+
+    if let Some(tray) = app_handle.tray_by_id("main") {
+        if let Err(e) = tray.set_title(Some(running_count)) {
+            eprintln!("Failed to set tray icon: {}", e);
+        }
+    } else {
+        eprintln!("Tray with ID 'tray' not found");
     }
 
     // Now update the database with the new status
@@ -142,9 +159,6 @@ pub fn update_task_status(
         params![status.clone(), task_id.clone()],
     )
     .map_err(|e| format!("Failed to update task status: {}", e))?;
-
-    // Update the tray icon to reflect the new state
-    update_tray_icon(&window.app_handle())?;
 
     Ok(())
 }
