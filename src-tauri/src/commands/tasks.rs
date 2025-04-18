@@ -67,43 +67,73 @@ pub fn update_task_status(
     // Get reference to tray state
     let tray_state = window.state::<TrayState>();
 
-    match status.as_str() {
-        "Running" => {
-            // Check if we can add another running task
+    // Get the current task status from the database to handle status transitions properly
+    let current_status: String = conn
+        .query_row(
+            "SELECT status FROM tasks WHERE id = ?1",
+            params![task_id.clone()],
+            |row| row.get(0)
+        )
+        .unwrap_or_else(|_| String::from(""));
+    
+    // Use more specific pattern matching to handle all cases explicitly based on the current status
+    match (status.as_str(), current_status.as_str()) {
+        // Running status transitions
+        ("Running", "Running") => {
+            // Already running - just ensure it's in the running tasks list
             tray_state.add_running_task(task_id.clone())?;
-
+        },
+        ("Running", _) => {
+            // Starting a new session or resuming a paused/completed task
+            tray_state.add_running_task(task_id.clone())?;
+            
             // Create a new TaskSession
             let new_session = TaskSession {
                 id: None,
-                duration: 0,
+                duration: 0, // Duration will be calculated when paused/completed
                 task_id: task_id.clone(),
                 started: Utc::now().to_rfc3339(),
                 ended: None,
             };
             create_task_session(&conn, new_session).map_err(|e| e.to_string())?;
-        }
-        "Paused" | "Completed" => {
-            // Remove from running tasks
+        },
+        
+        // Paused or Completed status transitions
+        ("Paused" | "Completed", "Running") => {
+            // Going from Running to Paused/Completed - need to stop the session and calculate duration
             tray_state.remove_running_task(&task_id)?;
 
             // End the current TaskSession and update duration
             let sessions = get_task_sessions(&conn, &task_id).map_err(|e| e.to_string())?;
-            if let Some(current_session) = sessions.into_iter().filter(|s| s.ended.is_none()).next()
-            {
+            if let Some(current_session) = sessions.into_iter().filter(|s| s.ended.is_none()).next() {
                 let started: DateTime<Utc> = DateTime::parse_from_rfc3339(&current_session.started)
                     .map_err(|e| e.to_string())?
                     .with_timezone(&Utc);
                 let ended: DateTime<Utc> = Utc::now();
-                let duration = ended.signed_duration_since(started).num_seconds();
-
+                
+                // Calculate precise duration in seconds for this session only
+                let session_duration = ended.signed_duration_since(started).num_seconds();
+                
+                // Make sure we're storing accurate duration (avoid negative values)
+                let final_duration = if session_duration > 0 { session_duration } else { 0 };
+                
                 conn.execute(
                     "UPDATE task_sessions SET ended = ?1, duration = ?2 WHERE id = ?3",
-                    params![ended.to_rfc3339(), duration, current_session.id.unwrap()],
+                    params![ended.to_rfc3339(), final_duration, current_session.id.unwrap()],
                 )
                 .map_err(|e| format!("Failed to update session: {}", e))?;
             }
+        },
+        ("Paused" | "Completed", _) => {
+            // Already paused/completed or changing between Paused and Completed
+            // Just ensure it's not in the running tasks list
+            tray_state.remove_running_task(&task_id)?;
+        },
+        
+        // Other status transitions (fallback)
+        (_, _) => {
+            // No action needed for other status combinations
         }
-        _ => {} // Handle "Not yet started" or any other status (do nothing)
     }
 
     // Now update the database with the new status

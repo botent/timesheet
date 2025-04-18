@@ -45,7 +45,7 @@ pub fn setup_app<R: Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<dyn std:
     app_handle.manage(tray_state);
 
     // Initialize the tray icon
-    set_tray_icon(app_handle).map_err(|e| Box::<dyn std::error::Error>::from(e.to_string()))?;
+    set_tray_icon(&app_handle).map_err(|e| Box::<dyn std::error::Error>::from(e.to_string()))?;
     update_tray_icon(&app_handle).map_err(|e| Box::<dyn std::error::Error>::from(e.to_string()))?;
 
     Ok(())

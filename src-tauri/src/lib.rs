@@ -10,10 +10,7 @@ pub fn run() {
         .setup(|app| {
             // Initialize the database and application state
             commands::setup_app(app)?;
-            
-            // Note: The tray icon will be implemented in a future update
-            // when Tauri v2 API is more stable and better documented
-            
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

@@ -1,13 +1,15 @@
 use std::sync::{Arc, Mutex};
-use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent, TrayIconId};
-use tauri::{AppHandle, Runtime};
+use tauri::image::Image;
+use tauri::menu::{MenuBuilder, MenuItem};
+use tauri::tray::TrayIconBuilder;
+use tauri::{AppHandle, Manager, Runtime};
+
+type TaskId = String;
 
 // Store running task count in state
 pub struct TrayState {
     pub running_tasks: Arc<Mutex<Vec<String>>>, // Store IDs of running tasks
 }
-
-type TaskId = String;
 
 impl TrayState {
     pub fn new() -> Self {
@@ -55,8 +57,6 @@ impl TrayState {
     }
 }
 
-use tauri::Manager;
-
 // Update the tray icon with task count information
 pub fn update_tray_icon<R: Runtime>(app_handle: &AppHandle<R>) -> Result<(), String> {
     // Get the current task count
@@ -70,7 +70,7 @@ pub fn update_tray_icon<R: Runtime>(app_handle: &AppHandle<R>) -> Result<(), Str
         count => format!("{} tasks running", count),
     };
 
-    if let Some(tray) = app_handle.tray_by_id("tray_ts") {
+    if let Some(tray) = app_handle.tray_by_id("tray_ts_t") {
         if let Err(e) = tray.set_title(Some(&tray_title)) {
             eprintln!("Failed to set tray title: {}", e);
         }
@@ -84,8 +84,20 @@ pub fn update_tray_icon<R: Runtime>(app_handle: &AppHandle<R>) -> Result<(), Str
 }
 
 pub fn set_tray_icon<R: Runtime>(app_handle: &AppHandle<R>) -> Result<(), String> {
-    let tray = TrayIconBuilder::with_id("tray_ts")
-        .icon(app_handle.default_window_icon().unwrap().clone())
-        .build(app_handle);
+    let quit_i =
+        MenuItem::with_id(app_handle, "quit", "Quit Time Sync", true, None::<&str>).unwrap();
+
+    let menu = MenuBuilder::new(app_handle).item(&quit_i).build().unwrap();
+
+    let _tray = TrayIconBuilder::with_id("tray_ts_t")
+        .icon(Image::from_path("././icons/icon.png").expect("msg"))
+        .title("title")
+        .menu(&menu)
+        .on_menu_event(|app_handle, event| match event.id.as_ref() {
+            "quit" => app_handle.exit(0),
+            _ => println!("Unhandled menu item: {:?}", event.id),
+        })
+        .build(app_handle)
+        .unwrap();
     Ok(())
 }
