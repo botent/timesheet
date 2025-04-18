@@ -1,10 +1,13 @@
 <script setup lang="ts">
 import { invoke } from "@tauri-apps/api/core";
 import { ref } from "vue";
-import { CheckIcon, Delete, Play, Pause } from "lucide-vue-next";
+import { CheckIcon, Delete, Play, Pause, Clock } from "lucide-vue-next";
 import { Task, TaskStatus } from "../types";
+import TaskSessionsTimeline from "./TaskSessionsTimeline.vue";
 
 const allTasks = ref<{ [date: string]: [Task, number][] }>({});
+const expandedTaskIds = ref<Set<string>>(new Set());
+
 async function fetchAndDisplayTasks() {
     try {
         allTasks.value = await invoke("display_tasks");
@@ -34,6 +37,14 @@ async function deleteTask(taskId: string) {
     }
 }
 
+function toggleTaskExpansion(taskId: string) {
+    if (expandedTaskIds.value.has(taskId)) {
+        expandedTaskIds.value.delete(taskId);
+    } else {
+        expandedTaskIds.value.add(taskId);
+    }
+}
+
 fetchAndDisplayTasks();
 </script>
 
@@ -52,45 +63,63 @@ fetchAndDisplayTasks();
             <div
                 v-for="([task, duration], index) in val"
                 :key="index"
-                class="w-full flex flex-row items-center justify-between space-x-4 mb-2"
+                class="w-full mb-4"
             >
-                <p class="font-semibold w-1/2">{{ task.title }}</p>
-                <p
-                    class="text-xs rounded-md p-1 bg-teal-500/10 border border-teal-600/10"
-                >
-                    {{ task.status }}
-                </p>
-                <p class="text-xs">Duration: {{ duration }} seconds</p>
-                <div
-                    class="place-self-end flex flex-row items-center justify-end space-x-2"
-                >
-                    <button
-                        v-if="task.status !== TaskStatus.RUNNING"
-                        class="rounded-sm !p-1 border border-neutral-700"
-                        @click="updateTaskStatus(task.id, TaskStatus.RUNNING)"
+                <div class="flex flex-row items-center justify-between space-x-4 mb-2">
+                    <div class="flex items-center space-x-2 w-1/2">
+                        <p class="font-semibold">{{ task.title }}</p>
+                        <button 
+                            class="rounded-full p-1 hover:bg-neutral-700 transition-colors"
+                            @click="toggleTaskExpansion(task.id)"
+                            title="View Session Timeline"
+                        >
+                            <Clock class="size-3 text-neutral-400" />
+                        </button>
+                    </div>
+                    <p
+                        class="text-xs rounded-md p-1 bg-teal-500/10 border border-teal-600/10"
                     >
-                        <Play class="size-3" />
-                    </button>
-                    <button
-                        v-if="task.status === TaskStatus.RUNNING"
-                        class="rounded-sm !p-1 border border-neutral-700"
-                        @click="updateTaskStatus(task.id, TaskStatus.PAUSED)"
+                        {{ task.status }}
+                    </p>
+                    <p class="text-xs">Duration: {{ duration }} seconds</p>
+                    <div
+                        class="place-self-end flex flex-row items-center justify-end space-x-2"
                     >
-                        <Pause class="size-3" />
-                    </button>
-                    <button
-                        class="rounded-sm !p-1 border border-neutral-700"
-                        @click="updateTaskStatus(task.id, TaskStatus.COMPLETED)"
-                    >
-                        <CheckIcon class="size-3" />
-                    </button>
-                    <button 
-                        class="rounded-sm !p-1 border border-neutral-700"
-                        @click="deleteTask(task.id)"
-                    >
-                        <Delete class="size-3" />
-                    </button>
+                        <button
+                            v-if="task.status !== TaskStatus.RUNNING"
+                            class="rounded-sm !p-1 border border-neutral-700"
+                            @click="updateTaskStatus(task.id, TaskStatus.RUNNING)"
+                        >
+                            <Play class="size-3" />
+                        </button>
+                        <button
+                            v-if="task.status === TaskStatus.RUNNING"
+                            class="rounded-sm !p-1 border border-neutral-700"
+                            @click="updateTaskStatus(task.id, TaskStatus.PAUSED)"
+                        >
+                            <Pause class="size-3" />
+                        </button>
+                        <button
+                            class="rounded-sm !p-1 border border-neutral-700"
+                            @click="updateTaskStatus(task.id, TaskStatus.COMPLETED)"
+                        >
+                            <CheckIcon class="size-3" />
+                        </button>
+                        <button 
+                            class="rounded-sm !p-1 border border-neutral-700"
+                            @click="deleteTask(task.id)"
+                        >
+                            <Delete class="size-3" />
+                        </button>
+                    </div>
                 </div>
+                
+                <!-- Session Timeline component -->
+                <TaskSessionsTimeline 
+                    v-if="task.id" 
+                    :taskId="task.id" 
+                    :isOpen="expandedTaskIds.has(task.id)" 
+                />
             </div>
         </div>
     </section>

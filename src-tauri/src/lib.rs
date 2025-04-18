@@ -19,6 +19,7 @@ pub fn run() {
             commands::tasks::display_tasks,
             commands::tasks::update_task_status,
             commands::tasks::delete_task,
+            commands::tasks::get_task_sessions,
             commands::database::reset_database,
         ])
         .on_window_event(|event_window, event| {

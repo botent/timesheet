@@ -1,5 +1,5 @@
 use crate::commands::tray::TrayState;
-use crate::helpers::database::{create_task_session, get_task_sessions, sum_task_session_duration};
+use crate::helpers::database::{create_task_session, sum_task_session_duration};
 use crate::models::{DbState, TaskSession, UserTask};
 use chrono::{DateTime, NaiveDateTime, Utc};
 use rusqlite::{params, Error};
@@ -78,8 +78,24 @@ pub fn update_task_status<R: Runtime>(
     match (status.as_str(), current_status.as_str()) {
         // Running status transitions
         ("Running", "Running") => {
-            // Already running - just ensure it's in the running tasks list
+            // End any existing sessions for this task before starting a fresh one
             tray_state.add_running_task(task_id.clone())?;
+            
+            // Close ALL existing sessions for this task
+            conn.execute(
+                "UPDATE task_sessions SET ended = ?1 WHERE task_id = ?2 AND ended IS NULL",
+                params![Utc::now().to_rfc3339(), task_id.clone()],
+            ).map_err(|e| format!("Failed to close existing sessions: {}", e))?;
+            
+            // Create a completely new TaskSession with 0 duration
+            let new_session = TaskSession {
+                id: None,
+                duration: 0,
+                task_id: task_id.clone(),
+                started: Utc::now().to_rfc3339(),
+                ended: None,
+            };
+            create_task_session(&conn, new_session).map_err(|e| e.to_string())?;
         }
         ("Running", _) => {
             // Starting a new session or resuming a paused/completed task
@@ -98,43 +114,51 @@ pub fn update_task_status<R: Runtime>(
 
         // Paused or Completed status transitions
         ("Paused" | "Completed", "Running") => {
-            // Going from Running to Paused/Completed - need to stop the session and calculate duration
+            // Going from Running to Paused/Completed - need to stop the session
             tray_state.remove_running_task(&task_id)?;
 
-            // End the current TaskSession and update duration
-            let sessions = get_task_sessions(&conn, &task_id).map_err(|e| e.to_string())?;
-            if let Some(current_session) = sessions.into_iter().filter(|s| s.ended.is_none()).next()
-            {
-                let started: DateTime<Utc> = DateTime::parse_from_rfc3339(&current_session.started)
-                    .map_err(|e| e.to_string())?
-                    .with_timezone(&Utc);
-                let ended: DateTime<Utc> = Utc::now();
-
-                // Calculate precise duration in seconds for this session only
-                let session_duration = ended.signed_duration_since(started).num_seconds();
-
-                // Make sure we're storing accurate duration (avoid negative values)
-                let final_duration = if session_duration > 0 {
-                    session_duration
-                } else {
-                    0
-                };
-
-                conn.execute(
-                    "UPDATE task_sessions SET ended = ?1, duration = ?2 WHERE id = ?3",
-                    params![
-                        ended.to_rfc3339(),
-                        final_duration,
-                        current_session.id.unwrap()
-                    ],
-                )
-                .map_err(|e| format!("Failed to update session: {}", e))?;
+            // End ALL current TaskSessions with actual duration calculation
+            
+            // First, get any active sessions
+            let mut stmt = conn.prepare(
+                "SELECT id, started FROM task_sessions WHERE task_id = ?1 AND ended IS NULL"
+            ).map_err(|e| format!("Failed to prepare statement: {}", e))?;
+            
+            let session_iter = stmt.query_map(params![task_id.clone()], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,  // id
+                    row.get::<_, String>(1)?,   // started
+                ))
+            }).map_err(|e| format!("Failed to execute query: {}", e))?;
+            
+            for session_result in session_iter {
+                if let Ok((session_id, started_str)) = session_result {
+                    if let Ok(started) = DateTime::parse_from_rfc3339(&started_str) {
+                        let started_utc = started.with_timezone(&Utc);
+                        let ended_utc = Utc::now();
+                        
+                        // Calculate precise duration in seconds for this session only
+                        let session_duration = ended_utc.signed_duration_since(started_utc).num_seconds();
+                        let final_duration = if session_duration > 0 { session_duration } else { 0 };
+                        
+                        conn.execute(
+                            "UPDATE task_sessions SET ended = ?1, duration = ?2 WHERE id = ?3",
+                            params![ended_utc.to_rfc3339(), final_duration, session_id],
+                        ).map_err(|e| format!("Failed to update session: {}", e))?;
+                    }
+                }
             }
         }
         ("Paused" | "Completed", _) => {
             // Already paused/completed or changing between Paused and Completed
             // Just ensure it's not in the running tasks list
             tray_state.remove_running_task(&task_id)?;
+            
+            // Ensure all sessions are properly ended when explicitly setting to Paused/Completed
+            conn.execute(
+                "UPDATE task_sessions SET ended = ?1 WHERE task_id = ?2 AND ended IS NULL",
+                params![Utc::now().to_rfc3339(), task_id.clone()],
+            ).map_err(|e| format!("Failed to close existing sessions: {}", e))?;
         }
 
         // Other status transitions (fallback)
@@ -182,6 +206,40 @@ pub fn delete_task(task_id: String, state: State<'_, DbState>) -> Result<(), Str
         .map_err(|e| format!("Failed to delete task: {}", e))?;
 
     Ok(())
+}
+
+#[tauri::command]
+pub fn get_task_sessions(task_id: String, state: State<'_, DbState>) -> Result<Vec<TaskSession>, String> {
+    let conn = state
+        .pool
+        .get()
+        .map_err(|e| format!("Failed to get connection from pool: {}", e))?;
+    
+    // Query all sessions for this task
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, duration, task_id, started, ended FROM task_sessions 
+             WHERE task_id = ?1 ORDER BY started ASC"
+        )
+        .map_err(|e| format!("Failed to prepare statement: {}", e))?;
+    
+    let session_iter = stmt
+        .query_map(params![task_id], |row| {
+            Ok(TaskSession {
+                id: Some(row.get(0)?),
+                duration: row.get(1)?,
+                task_id: row.get(2)?,
+                started: row.get(3)?,
+                ended: row.get(4)?,
+            })
+        })
+        .map_err(|e| format!("Failed to execute query: {}", e))?;
+    
+    let sessions = session_iter
+        .collect::<Result<Vec<TaskSession>, rusqlite::Error>>()
+        .map_err(|e| format!("Failed to collect sessions: {}", e))?;
+    
+    Ok(sessions)
 }
 
 #[tauri::command]

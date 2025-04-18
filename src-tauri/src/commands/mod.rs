@@ -6,7 +6,7 @@ pub mod tray;
 pub mod ui;
 
 use crate::commands::tray::{set_tray_icon, TrayState};
-use crate::helpers::database::create_task_sessions_table;
+use crate::helpers::database::{create_task_sessions_table, close_orphaned_sessions};
 use crate::models::DbState;
 use r2d2_sqlite::SqliteConnectionManager;
 
@@ -36,6 +36,9 @@ pub fn setup_app<R: Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<dyn std:
             [],
         )?;
         create_task_sessions_table(&conn)?;
+        
+        // Close any sessions that might have been left open when the app was last closed
+        close_orphaned_sessions(&conn).map_err(|e| Box::<dyn std::error::Error>::from(e))?;
     }
 
     app_handle.manage(DbState { pool });
