@@ -61,14 +61,16 @@ fetchAndDisplayTasks();
                 {{ key }}
             </p>
             <div
-                v-for="([task, duration], index) in val"
+                v-for="([task], index) in val"
                 :key="index"
                 class="w-full mb-4"
             >
-                <div class="flex flex-row items-center justify-between space-x-4 mb-2">
+                <div
+                    class="flex flex-row items-center justify-between space-x-4 mb-2"
+                >
                     <div class="flex items-center space-x-2 w-1/2">
                         <p class="font-semibold">{{ task.title }}</p>
-                        <button 
+                        <button
                             class="rounded-full p-1 hover:bg-neutral-700 transition-colors"
                             @click="toggleTaskExpansion(task.id)"
                             title="View Session Timeline"
@@ -81,31 +83,37 @@ fetchAndDisplayTasks();
                     >
                         {{ task.status }}
                     </p>
-                    <p class="text-xs">Duration: {{ duration }} seconds</p>
+
                     <div
                         class="place-self-end flex flex-row items-center justify-end space-x-2"
                     >
                         <button
                             v-if="task.status !== TaskStatus.RUNNING"
                             class="rounded-sm !p-1 border border-neutral-700"
-                            @click="updateTaskStatus(task.id, TaskStatus.RUNNING)"
+                            @click="
+                                updateTaskStatus(task.id, TaskStatus.RUNNING)
+                            "
                         >
                             <Play class="size-3" />
                         </button>
                         <button
                             v-if="task.status === TaskStatus.RUNNING"
                             class="rounded-sm !p-1 border border-neutral-700"
-                            @click="updateTaskStatus(task.id, TaskStatus.PAUSED)"
+                            @click="
+                                updateTaskStatus(task.id, TaskStatus.PAUSED)
+                            "
                         >
                             <Pause class="size-3" />
                         </button>
                         <button
                             class="rounded-sm !p-1 border border-neutral-700"
-                            @click="updateTaskStatus(task.id, TaskStatus.COMPLETED)"
+                            @click="
+                                updateTaskStatus(task.id, TaskStatus.COMPLETED)
+                            "
                         >
                             <CheckIcon class="size-3" />
                         </button>
-                        <button 
+                        <button
                             class="rounded-sm !p-1 border border-neutral-700"
                             @click="deleteTask(task.id)"
                         >
@@ -113,12 +121,12 @@ fetchAndDisplayTasks();
                         </button>
                     </div>
                 </div>
-                
+
                 <!-- Session Timeline component -->
-                <TaskSessionsTimeline 
-                    v-if="task.id" 
-                    :taskId="task.id" 
-                    :isOpen="expandedTaskIds.has(task.id)" 
+                <TaskSessionsTimeline
+                    v-if="task.id"
+                    :taskId="task.id"
+                    :isOpen="expandedTaskIds.has(task.id)"
                 />
             </div>
         </div>

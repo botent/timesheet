@@ -9,12 +9,14 @@
     "beforeBuildCommand": "bun run build",
     "frontendDist": "../dist"
   },
+  "mainBinaryName": "Ts",
   "app": {
     "windows": [
       {
         "title": "Time Sync",
-        "width": 800,
-        "height": 600
+        "width": 1200,
+        "height": 900,
+        "center": true
       }
     ],
     "security": {
